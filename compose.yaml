@@ -1,0 +1,95 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cobalt-backend
+    environment:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - DATABASE_URL=sqlite+aiosqlite:///./data/sessions.db
+      - KEYCLOAK_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=cobalt
+      - KEYCLOAK_CLIENT_ID=cobalt-backend
+      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:-}
+      - OIDC_ISSUER=http://keycloak:8080/realms/cobalt
+      - OIDC_AUDIENCE=cobalt-api
+      - OIDC_JWKS_URL=http://keycloak:8080/realms/cobalt/protocol/openid-connect/certs
+      - CORS_ORIGINS=http://localhost:3080
+      - ACP_ENABLED=true
+      - ACP_DEFAULT_WINDOW_TOKENS=100000
+      - ACP_COMPRESSION_TARGET_RATIO=0.2
+      - ACP_FOLD_THRESHOLD_TOKENS=80000
+      - BODY_LIMIT_RECEIVE=104857600
+      - BODY_LIMIT_DECODED=209715200
+      - BODY_LIMIT_OUTBOUND=104857600
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_PROVIDER=openai-compatible
+      - LLM_MODEL=gpt-4o-mini
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+    volumes:
+      - backend-data:/app/data
+    ports:
+      - "127.0.0.1:8787:8787"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8787/health', timeout=2).raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - cobalt-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cobalt-frontend
+    ports:
+      - "127.0.0.1:3080:3080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3080/"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - cobalt-network
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    container_name: cobalt-keycloak
+    command: start-dev --import-realm
+    environment:
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+      - KC_DB=dev-file
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - ./keycloak/realm.json:/opt/keycloak/data/import/realm.json:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health/ready"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - cobalt-network
+
+volumes:
+  backend-data:
+  keycloak-data:
+
+networks:
+  cobalt-network:
+    driver: bridge
