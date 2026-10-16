@@ -1,0 +1,53 @@
+# Dependencies
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+backend/dist/
+frontend/dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Docker
+.docker/
+
+# Agent metadata (explicitly ignored per contract)
+.antigravitycli/
+.omp/
+
+# Test artifacts
+.coverage
+.nyc_output/
+playwright-report/
+test-results/

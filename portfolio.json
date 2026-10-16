@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "cobalt-workbench-alan-vo",
+  "owner": "ALANDVO",
+  "email": "alanvo@gmail.com",
+  "domain": "AI/ML developer tools",
+  "workflows": [
+    "Compress conversation history using fold-based ACP protocol",
+    "Decompress folded history with anchor references",
+    "Monitor real-time ACP status and token savings dashboard"
+  ],
+  "auth": "oidc-keycloak-saml-broker",
+  "llm_providers": [
+    "openai-compatible",
+    "anthropic",
+    "gemini",
+    "ollama"
+  ],
+  "summary": "Work in progress: cobalt-workbench-alan-vo",
+  "status": "work-in-progress"
+}
