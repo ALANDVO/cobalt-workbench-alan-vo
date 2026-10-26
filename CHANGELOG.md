@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.0 — work-in-progress checkpoint
+
+Partial code published for continued development. Known issues: STATUS.md.
+
 ## 1.0.0 — work-in-progress checkpoint
 
 Partial code published for continued development. Known issues: STATUS.md.
@@ -28,4 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable ACP parameters: window tokens, compression ratio, fold threshold
 - Configurable HTTP body limits: receive, decoded, outbound
 - LLM provider settings (opt-in, advisory only)
+
+## [1.0.1] - 2026-10-26
+
+### Added
+- ACP fold-based compression service (`backend/app/services/acp_compress.py`)
+- Content-hash based stable message IDs for fold anchors
+- `fold_conversation()` — groups messages into summarized folds with target compression ratio
+- `unfold_conversation()` — expands fold anchors into structured summaries
+- Token estimation (~4 chars/token) and message summarization utilities
+- `/acp/compress` endpoint: accepts messages, preserve_recent, returns folded messages + anchors + token counts
+- `/acp/decompress` endpoint: expands fold anchors from folded messages + anchor metadata
+- Real compression ratio calculation based on actual token estimates
+- Test coverage in existing `test_acp_status.py` for compress/decompress endpoints
 - Keycloak/OIDC settings for authentication
