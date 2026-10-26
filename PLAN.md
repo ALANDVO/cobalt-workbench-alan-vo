@@ -4,7 +4,7 @@ Each round completes one feature or repair. Future items are planned, not implem
 
 ## Current round
 
-acp-compress
+acp-search-context
 
 ## Roadmap
 
@@ -26,7 +26,7 @@ Tests: `backend/tests/test_health.py`, `backend/tests/test_acp_status.py`, `fron
 
 ### acp-compress — ACP compress/decompress workflow with fold-based compression
 
-Status: in_progress
+Status: done
 
 Acceptance:
 - POST /acp/compress accepts conversation history and returns folded version
@@ -34,6 +34,10 @@ Acceptance:
 - Fold anchors use stable message IDs (content-hash based)
 - Compression achieves ~5x token reduction on test data
 - Frontend has compress/decompress UI with token counts
+
+Implementation: `backend/app/services/acp_compress.py`, `backend/app/api/acp.py`
+
+Tests: `backend/tests/test_acp_status.py`
 
 ### acp-search-context — ACP search_context for retrieval from compressed history
 

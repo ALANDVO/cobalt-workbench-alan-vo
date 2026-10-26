@@ -3,9 +3,16 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
+
 from app.core.config import get_settings, Settings
+from app.services.acp_compress import (
+    fold_conversation,
+    unfold_conversation,
+    FoldAnchor,
+)
 
 router = APIRouter()
+
 
 
 class FoldStats(BaseModel):
@@ -148,18 +155,19 @@ async def compress_history(
     if not settings.acp_enabled:
         raise HTTPException(status_code=503, detail="ACP is disabled")
 
-    # TODO: Implement actual fold-based compression
-    # For skeleton, return mock response
-    original_tokens = sum(len(str(m).split()) for m in request.messages) * 4 // 3
-    folded_tokens = int(original_tokens * settings.acp_compression_target_ratio)
+    result = fold_conversation(
+        messages=request.messages,
+        preserve_recent=request.preserve_recent,
+        target_ratio=settings.acp_compression_target_ratio,
+    )
 
     return CompressResponse(
-        folded_messages=request.messages[-request.preserve_recent:],
-        fold_anchors=[{"id": f"anchor_{i}", "summary": f"Folded segment {i}"} for i in range(3)],
-        original_tokens=original_tokens,
-        folded_tokens=folded_tokens,
-        compression_ratio=folded_tokens / original_tokens if original_tokens > 0 else 0,
-        fold_id="fold_mock_001",
+        folded_messages=result.folded_messages,
+        fold_anchors=[a.to_dict() for a in result.fold_anchors],
+        original_tokens=result.original_tokens,
+        folded_tokens=result.folded_tokens,
+        compression_ratio=result.compression_ratio,
+        fold_id=result.fold_id,
     )
 
 
@@ -179,9 +187,16 @@ class DecompressResponse(BaseModel):
 async def decompress_history(request: DecompressRequest) -> DecompressResponse:
     """
     Restore original messages from folded representation and anchors.
+    Note: Full restoration requires original messages from session storage.
+    This expands fold anchors into structured summaries.
     """
-    # TODO: Implement actual decompression using stored fold data
+    messages, restored_count = unfold_conversation(
+        folded_messages=request.folded_messages,
+        fold_anchors=request.fold_anchors,
+        original_messages=None,  # Would come from session storage in session-persistence feature
+    )
+
     return DecompressResponse(
-        messages=request.folded_messages,
-        restored_count=len(request.fold_anchors) * 50,  # mock
+        messages=messages,
+        restored_count=restored_count,
     )

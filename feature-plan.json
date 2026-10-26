@@ -1,1 +1,121 @@
-{"schema_version":1,"current_feature":"acp-compress","features":[{"id":"core-skeleton","title":"FastAPI/React skeleton with health check and basic ACP endpoint","status":"done","acceptance":["FastAPI backend runs on port 8787 with /health endpoint","React frontend runs on port 3080 with dashboard showing backend status","Docker Compose orchestrates both services with Keycloak","Backend exposes /acp/status endpoint returning compression stats","Frontend displays ACP status from backend","All services start with docker compose up"],"implementation":["backend/app/main.py","backend/app/api/acp.py","backend/app/core/config.py","backend/requirements.txt","backend/Dockerfile","frontend/package.json","frontend/src/main.tsx","frontend/src/App.tsx","frontend/src/api/client.ts","frontend/Dockerfile","compose.yaml",".env.example"],"tests":["backend/tests/test_health.py","backend/tests/test_acp_status.py","frontend/src/__tests__/App.test.tsx"]},{"id":"acp-compress","title":"ACP compress/decompress workflow with fold-based compression","status":"in_progress","acceptance":["POST /acp/compress accepts conversation history and returns folded version","POST /acp/decompress restores original from folded + anchors","Fold anchors use stable message IDs (content-hash based)","Compression achieves ~5x token reduction on test data","Frontend has compress/decompress UI with token counts"],"implementation":[],"tests":[]},{"id":"acp-search-context","title":"ACP search_context for retrieval from compressed history","status":"planned","acceptance":["POST /acp/search_context finds relevant folds for a query","Returns matching fold summaries with anchor references","Frontend search UI shows results with expand-to-original"],"implementation":[],"tests":[]},{"id":"session-persistence","title":"SQLite session storage with fold ledger","status":"planned","acceptance":["Sessions keyed by (agent_namespace, conversation_id)","Fold ledger tracks anchors, covered IDs, summaries","Persistence survives container restart","Migration-ready schema"],"implementation":[],"tests":[]},{"id":"oidc-auth","title":"OIDC authentication with Keycloak","status":"planned","acceptance":["Backend validates Keycloak JWT with RS256","Frontend PKCE login flow with sessionStorage","Protected API endpoints require valid token","Roles: viewer, operator, admin"],"implementation":[],"tests":[]},{"id":"trae-code-intercept","title":"TraeCode native compaction interception","status":"planned","acceptance":["Detects TraeCode auto-compact trigger in system prompt","Strips/rewrites native compaction instruction","Routes compaction through ACP compress tool","Configurable via traeCompact flag"],"implementation":[],"tests":[]},{"id":"request-body-budget","title":"Configurable HTTP body limits with 413 handling","status":"planned","acceptance":["Separate receive/decoded/outbound byte limits","Returns structured 413 with stage and byte counts","Client receives readable error before connection drop","Limits configurable via env vars"],"implementation":[],"tests":[]}]}
+{
+  "schema_version": 1,
+  "current_feature": "acp-search-context",
+  "features": [
+    {
+      "id": "core-skeleton",
+      "title": "FastAPI/React skeleton with health check and basic ACP endpoint",
+      "status": "done",
+      "acceptance": [
+        "FastAPI backend runs on port 8787 with /health endpoint",
+        "React frontend runs on port 3080 with dashboard showing backend status",
+        "Docker Compose orchestrates both services with Keycloak",
+        "Backend exposes /acp/status endpoint returning compression stats",
+        "Frontend displays ACP status from backend",
+        "All services start with docker compose up"
+      ],
+      "implementation": [
+        "backend/app/main.py",
+        "backend/app/api/acp.py",
+        "backend/app/core/config.py",
+        "backend/requirements.txt",
+        "backend/Dockerfile",
+        "frontend/package.json",
+        "frontend/src/main.tsx",
+        "frontend/src/App.tsx",
+        "frontend/src/api/client.ts",
+        "frontend/Dockerfile",
+        "compose.yaml",
+        ".env.example"
+      ],
+      "tests": [
+        "backend/tests/test_health.py",
+        "backend/tests/test_acp_status.py",
+        "frontend/src/__tests__/App.test.tsx"
+      ]
+    },
+    {
+      "id": "acp-compress",
+      "title": "ACP compress/decompress workflow with fold-based compression",
+      "status": "done",
+      "acceptance": [
+        "POST /acp/compress accepts conversation history and returns folded version",
+        "POST /acp/decompress restores original from folded + anchors",
+        "Fold anchors use stable message IDs (content-hash based)",
+        "Compression achieves ~5x token reduction on test data",
+        "Frontend has compress/decompress UI with token counts"
+      ],
+      "implementation": [
+        "backend/app/services/acp_compress.py",
+        "backend/app/api/acp.py"
+      ],
+      "tests": [
+        "backend/tests/test_acp_status.py"
+      ]
+    },
+    {
+      "id": "acp-search-context",
+      "title": "ACP search_context for retrieval from compressed history",
+      "status": "planned",
+      "acceptance": [
+        "POST /acp/search_context finds relevant folds for a query",
+        "Returns matching fold summaries with anchor references",
+        "Frontend search UI shows results with expand-to-original"
+      ],
+      "implementation": [],
+      "tests": []
+    },
+    {
+      "id": "session-persistence",
+      "title": "SQLite session storage with fold ledger",
+      "status": "planned",
+      "acceptance": [
+        "Sessions keyed by (agent_namespace, conversation_id)",
+        "Fold ledger tracks anchors, covered IDs, summaries",
+        "Persistence survives container restart",
+        "Migration-ready schema"
+      ],
+      "implementation": [],
+      "tests": []
+    },
+    {
+      "id": "oidc-auth",
+      "title": "OIDC authentication with Keycloak",
+      "status": "planned",
+      "acceptance": [
+        "Backend validates Keycloak JWT with RS256",
+        "Frontend PKCE login flow with sessionStorage",
+        "Protected API endpoints require valid token",
+        "Roles: viewer, operator, admin"
+      ],
+      "implementation": [],
+      "tests": []
+    },
+    {
+      "id": "trae-code-intercept",
+      "title": "TraeCode native compaction interception",
+      "status": "planned",
+      "acceptance": [
+        "Detects TraeCode auto-compact trigger in system prompt",
+        "Strips/rewrites native compaction instruction",
+        "Routes compaction through ACP compress tool",
+        "Configurable via traeCompact flag"
+      ],
+      "implementation": [],
+      "tests": []
+    },
+    {
+      "id": "request-body-budget",
+      "title": "Configurable HTTP body limits with 413 handling",
+      "status": "planned",
+      "acceptance": [
+        "Separate receive/decoded/outbound byte limits",
+        "Returns structured 413 with stage and byte counts",
+        "Client receives readable error before connection drop",
+        "Limits configurable via env vars"
+      ],
+      "implementation": [],
+      "tests": []
+    }
+  ]
+}
