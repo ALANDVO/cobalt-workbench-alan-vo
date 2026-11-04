@@ -56,14 +56,22 @@
     {
       "id": "acp-search-context",
       "title": "ACP search_context for retrieval from compressed history",
-      "status": "planned",
+      "status": "done",
       "acceptance": [
         "POST /acp/search_context finds relevant folds for a query",
         "Returns matching fold summaries with anchor references",
         "Frontend search UI shows results with expand-to-original"
       ],
-      "implementation": [],
-      "tests": []
+      "implementation": [
+        "backend/app/services/acp_compress.py",
+        "backend/app/api/acp.py",
+        "frontend/src/api/client.ts",
+        "frontend/src/App.tsx",
+        "frontend/src/App.css"
+      ],
+      "tests": [
+        "backend/tests/test_acp_status.py"
+      ]
     },
     {
       "id": "session-persistence",

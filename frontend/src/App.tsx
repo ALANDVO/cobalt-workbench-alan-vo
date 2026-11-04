@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getHealth, getACPStatus, type HealthResponse, type ACPStatusResponse, type SessionSummary } from './api/client'
+import { getHealth, getACPStatus, searchContext, type HealthResponse, type ACPStatusResponse, type SessionSummary, type SearchContextResult, type SearchContextResponse } from './api/client'
 import './App.css'
 
 function StatusBadge({ status, label }: { status: string; label: string }) {
@@ -80,6 +80,18 @@ function FoldRow({ fold }: { fold: { fold_id: string; original_tokens: number; f
       <td>{new Date(fold.created_at).toLocaleString()}</td>
     </tr>
   )
+function SearchResultRow({ result }: { result: SearchContextResult }) {
+  const scorePct = Math.round(result.score * 100)
+  return (
+    <tr>
+      <td><code>{result.anchor_id}</code></td>
+      <td className="search-summary-cell">{result.summary}</td>
+      <td><span className="compression-ratio">{scorePct}%</span></td>
+      <td>{result.original_tokens.toLocaleString()}</td>
+      <td>{result.covered_message_ids.length}</td>
+      <td>{result.start_idx}–{result.end_idx}</td>
+    </tr>
+  )
 }
 
 export default function App() {
@@ -87,6 +99,10 @@ export default function App() {
   const [acpStatus, setAcpStatus] = useState<ACPStatusResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchContextResponse | null>(null)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
 
   async function fetchData() {
     try {
@@ -98,6 +114,46 @@ export default function App() {
       setError(e instanceof Error ? e.message : 'Failed to load data')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleSearch() {
+    if (!searchQuery.trim() || !acpStatus) return
+
+    setSearchLoading(true)
+    setSearchError(null)
+    setSearchResults(null)
+
+    try {
+      // Collect all fold anchors from recent folds and sessions
+      const allAnchors: Record<string, unknown>[] = []
+
+      // Add anchors from recent folds (mock data structure)
+      for (const fold of acpStatus.recent_folds) {
+        // In a real implementation, fold_anchors would come from the fold data
+        // For now, create a mock anchor from fold data
+        allAnchors.push({
+          id: fold.fold_id,
+          summary: `Fold with ${fold.anchor_count} anchors, ${fold.covered_message_count} messages`,
+          covered_message_ids: [],
+          start_idx: 0,
+          end_idx: fold.covered_message_count - 1,
+          original_tokens: fold.original_tokens,
+          folded_tokens: fold.folded_tokens,
+        })
+      }
+
+      const response = await searchContext({
+        query: searchQuery,
+        fold_anchors: allAnchors,
+        max_results: 10,
+        min_score: 0.1,
+      })
+      setSearchResults(response)
+    } catch (e) {
+      setSearchError(e instanceof Error ? e.message : 'Search failed')
+    } finally {
+      setSearchLoading(false)
     }
   }
 
@@ -235,16 +291,61 @@ export default function App() {
           )}
         </section>
 
-        <section className="panel config-panel">
-          <h2>Configuration</h2>
-          <dl className="config-list">
-            <div><dt>ACP Enabled</dt><dd>{acpStatus?.enabled ? 'Yes' : 'No'}</dd></div>
-            <div><dt>Default Window</dt><dd>{acpStatus?.default_window_tokens?.toLocaleString()} tokens</dd></div>
-            <div><dt>Target Ratio</dt><dd>{Math.round((acpStatus?.compression_target_ratio || 0) * 100)}%</dd></div>
-            <div><dt>Fold Threshold</dt><dd>{acpStatus?.fold_threshold_tokens?.toLocaleString()} tokens</dd></div>
-            <div><dt>Service</dt><dd>{health?.service} v{health?.version}</dd></div>
-            <div><dt>Environment</dt><dd>{health?.environment}</dd></div>
-          </dl>
+        </section>
+
+        <section className="panel search-panel">
+          <h2>Search Context</h2>
+          <div className="search-form">
+            <input
+              type="text"
+              placeholder="Search compressed conversation folds..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              className="search-input"
+            />
+            <button onClick={handleSearch} disabled={searchLoading || !searchQuery.trim()} className="search-btn">
+              {searchLoading ? 'Searching...' : 'Search'}
+            </button>
+          </div>
+          {searchError && (
+            <div className="search-error" role="alert">
+              <span>⚠</span>
+              <span>{searchError}</span>
+            </div>
+          )}
+          {searchResults !== null && (
+            <div className="search-results">
+              {searchResults.results_count === 0 ? (
+                <p className="empty-state">No matching folds found for "{searchQuery}".</p>
+              ) : (
+                <>
+                  <p className="search-summary">
+                    Found {searchResults.results_count} of {searchResults.total_anchors_searched} folds matching "{searchQuery}"
+                  </p>
+                  <div className="table-wrapper scrollbar-thin">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Anchor ID</th>
+                          <th>Summary</th>
+                          <th>Score</th>
+                          <th>Original Tokens</th>
+                          <th>Covered Msgs</th>
+                          <th>Index Range</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {searchResults.results.map((result: SearchContextResult) => (
+                          <SearchResultRow key={result.anchor_id} result={result} />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </section>
       </main>
 

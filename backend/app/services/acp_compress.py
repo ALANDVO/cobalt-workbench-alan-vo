@@ -274,6 +274,136 @@ def unfold_conversation(
         else:
             restored.append(msg)
 
-    return restored, restored_count
+def search_folds(
+    query: str,
+    fold_anchors: list[FoldAnchor],
+    max_results: int = 10,
+    min_score: float = 0.1,
+) -> list[dict[str, Any]]:
+    """Search fold anchors for relevance to a query.
 
+    Args:
+        query: Search query string
+        fold_anchors: List of fold anchors to search
+        max_results: Maximum number of results to return
+        min_score: Minimum relevance score (0-1) to include
+
+    Returns:
+        List of matching fold summaries with anchor references and scores
+    """
+    if not query.strip() or not fold_anchors:
+        return []
+
+    query_lower = query.lower()
+    query_terms = set(query_lower.split())
+
+    results: list[dict[str, Any]] = []
+
+    for anchor in fold_anchors:
+        # Score based on summary text match
+        summary_lower = anchor.summary.lower()
+        summary_terms = set(summary_lower.split())
+
+        # Term overlap score (Jaccard similarity)
+        if query_terms and summary_terms:
+            intersection = query_terms & summary_terms
+            union = query_terms | summary_terms
+            term_score = len(intersection) / len(union) if union else 0
+        else:
+            term_score = 0.0
+
+        # Substring match bonus
+        substring_score = 0.0
+        for term in query_terms:
+            if term in summary_lower:
+                substring_score += 0.3
+        substring_score = min(substring_score, 0.5)
+
+        # Role relevance bonus
+        role_score = 0.0
+        for term in query_terms:
+            if term in ["user", "assistant", "system", "tool"]:
+                role_terms = set(summary_lower.split())
+                if term in role_terms:
+                    role_score += 0.2
+        role_score = min(role_score, 0.3)
+
+        total_score = term_score + substring_score + role_score
+
+        if total_score >= min_score:
+            results.append({
+                "anchor_id": anchor.id,
+                "summary": anchor.summary,
+                "covered_message_ids": anchor.covered_message_ids,
+                "start_idx": anchor.start_idx,
+                "end_idx": anchor.end_idx,
+                "original_tokens": anchor.original_tokens,
+                "folded_tokens": anchor.folded_tokens,
+                "score": round(total_score, 3),
+            })
+
+    # Sort by score descending
+    results.sort(key=lambda x: x["score"], reverse=True)
+
+    return results[:max_results]
+
+
+class SearchContextRequest(BaseModel):
+    """Request to search compressed conversation context."""
+    query: str = Field(..., description="Search query")
+    fold_anchors: list[dict[str, Any]] = Field(..., description="Fold anchors from compressed history")
+    max_results: int = Field(10, description="Maximum results to return")
+    min_score: float = Field(0.1, description="Minimum relevance score (0-1)")
+
+
+class SearchContextResult(BaseModel):
+    """Single search result from a fold anchor."""
+    anchor_id: str
+    summary: str
+    covered_message_ids: list[str]
+    start_idx: int
+    end_idx: int
+    original_tokens: int
+    folded_tokens: int
+    score: float
+
+
+class SearchContextResponse(BaseModel):
+    """Response from search_context operation."""
+    query: str
+    results: list[SearchContextResult]
+    total_anchors_searched: int
+    results_count: int
+
+
+def search_context(request: SearchContextRequest) -> SearchContextResponse:
+    """Search compressed conversation folds for relevant context.
+
+    Args:
+        request: Search request with query and fold anchors
+
+    Returns:
+        SearchContextResponse with matching folds ranked by relevance
+    """
+    # Convert dict anchors to FoldAnchor objects
+    anchors: list[FoldAnchor] = []
+    for a in request.fold_anchors:
+        anchors.append(FoldAnchor(
+            id=a["id"],
+            summary=a["summary"],
+            covered_message_ids=a["covered_message_ids"],
+            start_idx=a["start_idx"],
+            end_idx=a["end_idx"],
+            original_tokens=a["original_tokens"],
+            folded_tokens=a["folded_tokens"],
+        ))
+
+    results = search_folds(request.query, anchors, request.max_results, request.min_score)
+
+    return SearchContextResponse(
+        query=request.query,
+        results=[SearchContextResult(**r) for r in results],
+        total_anchors_searched=len(anchors),
+        results_count=len(results),
+    )
 
