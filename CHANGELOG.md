@@ -1,8 +1,20 @@
 # Changelog
 
+## 1.2.0 — work-in-progress checkpoint
+
+Partial code published for continued development. Known issues: STATUS.md.
+
 ## 1.1.0 — work-in-progress checkpoint
 
 Partial code published for continued development. Known issues: STATUS.md.
+
+### Added (acp-search-context)
+- `search_folds()` service function: Jaccard similarity + substring + role relevance scoring for fold anchors
+- `SearchContextRequest`, `SearchContextResult`, `SearchContextResponse` Pydantic models
+- `search_context()` service function orchestrating search over fold anchors
+- POST `/acp/search_context` endpoint returning ranked fold matches with scores
+- Frontend search UI: query input, results table with anchor ID, summary, score, token counts, index range
+- Backend test coverage: search_context endpoint, empty query, no anchors edge cases
 
 ## 1.0.0 — work-in-progress checkpoint
 

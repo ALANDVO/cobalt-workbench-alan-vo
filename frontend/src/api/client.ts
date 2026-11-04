@@ -103,9 +103,29 @@ export interface DecompressRequest {
   fold_anchors: Record<string, unknown>[]
 }
 
-export interface DecompressResponse {
-  messages: Record<string, unknown>[]
-  restored_count: number
+export interface SearchContextRequest {
+  query: string
+  fold_anchors: Record<string, unknown>[]
+  max_results?: number
+  min_score?: number
+}
+
+export interface SearchContextResult {
+  anchor_id: string
+  summary: string
+  covered_message_ids: string[]
+  start_idx: number
+  end_idx: number
+  original_tokens: number
+  folded_tokens: number
+  score: number
+}
+
+export interface SearchContextResponse {
+  query: string
+  results: SearchContextResult[]
+  total_anchors_searched: number
+  results_count: number
 }
 
 /** API functions */
@@ -121,6 +141,6 @@ export async function compressHistory(request: CompressRequest): Promise<Compres
   return api.post('/acp/compress', request)
 }
 
-export async function decompressHistory(request: DecompressRequest): Promise<DecompressResponse> {
-  return api.post('/acp/decompress', request)
+export async function searchContext(request: SearchContextRequest): Promise<SearchContextResponse> {
+  return api.post('/acp/search_context', request)
 }

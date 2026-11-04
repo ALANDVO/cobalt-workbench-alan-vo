@@ -4,11 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from app.core.config import get_settings, Settings
 from app.services.acp_compress import (
     fold_conversation,
     unfold_conversation,
     FoldAnchor,
+    search_context,
+    SearchContextRequest,
+    SearchContextResponse,
+    SearchContextResult,
 )
 
 router = APIRouter()
@@ -200,3 +203,36 @@ async def decompress_history(request: DecompressRequest) -> DecompressResponse:
         messages=messages,
         restored_count=restored_count,
     )
+
+
+class SearchContextRequest(BaseModel):
+    """Request to search compressed conversation context."""
+    query: str = Field(..., description="Search query")
+    fold_anchors: list[dict] = Field(..., description="Fold anchors from compressed history")
+    max_results: int = Field(10, description="Maximum results to return")
+    min_score: float = Field(0.1, description="Minimum relevance score (0-1)")
+
+
+class SearchContextResponse(BaseModel):
+    """Response from search_context operation."""
+    query: str
+    results: list[SearchContextResult]
+    total_anchors_searched: int
+    results_count: int
+
+
+@router.post("/search_context", response_model=SearchContextResponse, summary="Search compressed context")
+async def search_context_endpoint(request: SearchContextRequest) -> SearchContextResponse:
+    """
+    Search compressed conversation folds for relevant context.
+
+    Returns matching fold summaries with anchor references ranked by relevance.
+    """
+    service_request = SearchContextRequest(
+        query=request.query,
+        fold_anchors=request.fold_anchors,
+        max_results=request.max_results,
+        min_score=request.min_score,
+    )
+
+    return search_context(service_request)

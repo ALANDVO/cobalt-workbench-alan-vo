@@ -41,12 +41,16 @@ Tests: `backend/tests/test_acp_status.py`
 
 ### acp-search-context — ACP search_context for retrieval from compressed history
 
-Status: planned
+Status: done
 
 Acceptance:
 - POST /acp/search_context finds relevant folds for a query
 - Returns matching fold summaries with anchor references
 - Frontend search UI shows results with expand-to-original
+
+Implementation: `backend/app/services/acp_compress.py`, `backend/app/api/acp.py`, `frontend/src/api/client.ts`, `frontend/src/App.tsx`, `frontend/src/App.css`
+
+Tests: `backend/tests/test_acp_status.py`
 
 ### session-persistence — SQLite session storage with fold ledger
 
