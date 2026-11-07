@@ -62,3 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Real compression ratio calculation based on actual token estimates
 - Test coverage in existing `test_acp_status.py` for compress/decompress endpoints
 - Keycloak/OIDC settings for authentication
+
+---
+
+Alan Vo · [alanvo.net](https://alanvo.net)

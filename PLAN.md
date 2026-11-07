@@ -92,3 +92,6 @@ Acceptance:
 - Client receives readable error before connection drop
 - Limits configurable via env vars
 
+---
+
+Alan Vo · [alanvo.net](https://alanvo.net)
