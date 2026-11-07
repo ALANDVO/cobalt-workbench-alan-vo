@@ -8,6 +8,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from pydantic import BaseModel, Field
 
 
 @dataclass
@@ -23,29 +24,15 @@ class FoldAnchor:
     created_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for API responses."""
         return {
-            "id": self.id,
-            "summary": self.summary,
-            "covered_message_ids": self.covered_message_ids,
-            "start_idx": self.start_idx,
-            "end_idx": self.end_idx,
-            "original_tokens": self.original_tokens,
-            "folded_tokens": self.folded_tokens,
+            "fold_id": self.id,
+            "anchor_text": self.summary,
+            "covered_ids": self.covered_message_ids,
+            "token_count": self.folded_tokens,
             "created_at": self.created_at,
+            "message_count": len(self.covered_message_ids),
         }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "FoldAnchor":
-        return cls(
-            id=data["id"],
-            summary=data["summary"],
-            covered_message_ids=data["covered_message_ids"],
-            start_idx=data["start_idx"],
-            end_idx=data["end_idx"],
-            original_tokens=data["original_tokens"],
-            folded_tokens=data["folded_tokens"],
-            created_at=data.get("created_at", time.time()),
-        )
 
 
 @dataclass
@@ -72,19 +59,15 @@ def estimate_tokens(text: str) -> int:
 
 def count_message_tokens(message: dict[str, Any]) -> int:
     """Count tokens in a message."""
-    content = message.get("content", "")
-    if isinstance(content, str):
-        return estimate_tokens(content)
-    elif isinstance(content, list):
-        # Handle multimodal content
-        return sum(estimate_tokens(str(c)) for c in content)
+    if "content" in message and isinstance(message["content"], str):
+        return estimate_tokens(message["content"])
     return 0
 
 
 def summarize_messages(messages: list[dict[str, Any]]) -> str:
     """Create a summary of folded messages."""
     if not messages:
-        return "Empty segment"
+        return "Empty fold"
 
     roles = [m.get("role", "unknown") for m in messages]
     role_counts: dict[str, int] = {}
@@ -92,8 +75,13 @@ def summarize_messages(messages: list[dict[str, Any]]) -> str:
         role_counts[r] = role_counts.get(r, 0) + 1
 
     parts = [f"{count} {role}" for role, count in role_counts.items()]
-    first_user = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
-    preview = first_user[:100] + ("..." if len(first_user) > 100 else "")
+
+    # Include a brief preview of the first message content
+    preview = ""
+    if messages:
+        first_content = messages[0].get("content", "")
+        if isinstance(first_content, str) and first_content:
+            preview = first_content[:80] + ("..." if len(first_content) > 80 else "")
 
     return f"{', '.join(parts)}: {preview}" if preview else f"{', '.join(parts)}"
 
@@ -106,7 +94,7 @@ def fold_conversation(
     """Compress conversation using fold-based compression.
 
     Args:
-        messages: Full conversation history
+        messages: Full conversation history (oldest first)
         preserve_recent: Number of recent messages to keep uncompressed
         target_ratio: Target compression ratio (folded/original)
 
@@ -115,113 +103,85 @@ def fold_conversation(
     """
     if len(messages) <= preserve_recent:
         # Nothing to fold
-        total_tokens = sum(count_message_tokens(m) for m in messages)
         return CompressedConversation(
             folded_messages=messages,
             fold_anchors=[],
-            original_tokens=total_tokens,
-            folded_tokens=total_tokens,
+            original_tokens=sum(count_message_tokens(m) for m in messages),
+            folded_tokens=sum(count_message_tokens(m) for m in messages),
             compression_ratio=1.0,
             fold_id="",
         )
 
-    # Split into foldable prefix and preserved suffix
+    # Split into foldable and recent
     foldable = messages[:-preserve_recent]
-    preserved = messages[-preserve_recent:]
+    recent = messages[-preserve_recent:]
 
-    # Generate message IDs for all messages
-    msg_ids = [message_id(m) for m in messages]
+    # Calculate tokens
+    original_tokens = sum(count_message_tokens(m) for m in foldable)
+    target_folded = int(original_tokens * target_ratio)
 
-    # Group foldable messages into chunks for folding
-    # Aim for chunks that compress to target_ratio
-    fold_anchors: list[FoldAnchor] = []
-    folded_prefix: list[dict[str, Any]] = []
-    current_chunk: list[dict[str, Any]] = []
-    current_chunk_ids: list[str] = []
-    current_chunk_start = 0
-    current_original_tokens = 0
+    # Create fold anchors - group messages into chunks
+    fold_anchors = []
+    current_chunk = []
+    current_tokens = 0
+    chunk_start = 0
 
     for i, msg in enumerate(foldable):
         msg_tokens = count_message_tokens(msg)
         current_chunk.append(msg)
-        current_chunk_ids.append(msg_ids[i])
-        current_original_tokens += msg_tokens
+        current_tokens += msg_tokens
 
-        # Check if chunk is large enough to fold
-        # Target: folded tokens ≈ original * target_ratio
-        # Summary tokens ≈ 50-100
-        estimated_folded = 80  # summary token estimate
-        if current_original_tokens * target_ratio >= estimated_folded and len(current_chunk) >= 3:
-            # Create fold anchor
-            anchor_id = hashlib.sha256(
-                "".join(current_chunk_ids).encode()
-            ).hexdigest()[:12]
+        # Create fold when we hit target or at end
+        should_fold = (
+            current_tokens >= target_folded and len(fold_anchors) == 0
+        ) or (i == len(foldable) - 1)
 
+        if should_fold and current_chunk:
+            covered_ids = [message_id(m) for m in current_chunk]
+            summary = summarize_messages(current_chunk)
             anchor = FoldAnchor(
-                id=f"fold_{anchor_id}",
-                summary=summarize_messages(current_chunk),
-                covered_message_ids=current_chunk_ids,
-                start_idx=current_chunk_start,
-                end_idx=current_chunk_start + len(current_chunk) - 1,
-                original_tokens=current_original_tokens,
-                folded_tokens=estimated_folded,
+                id=hashlib.sha256(
+                    f"{chunk_start}-{i}-{summary}".encode()
+                ).hexdigest()[:16],
+                summary=summary,
+                covered_message_ids=covered_ids,
+                start_idx=chunk_start,
+                end_idx=i,
+                original_tokens=current_tokens,
+                folded_tokens=max(1, int(current_tokens * target_ratio)),
             )
             fold_anchors.append(anchor)
-
-            # Add summary message to folded prefix
-            folded_prefix.append({
-                "role": "system",
-                "content": f"[Folded: {anchor.summary}]",
-                "fold_anchor_id": anchor.id,
-            })
-
-            # Reset chunk
             current_chunk = []
-            current_chunk_ids = []
-            current_chunk_start = i + 1
-            current_original_tokens = 0
+            current_tokens = 0
+            chunk_start = i + 1
 
-    # Handle remaining messages in chunk
-    if current_chunk:
-        anchor_id = hashlib.sha256(
-            "".join(current_chunk_ids).encode()
-        ).hexdigest()[:12]
-        anchor = FoldAnchor(
-            id=f"fold_{anchor_id}",
-            summary=summarize_messages(current_chunk),
-            covered_message_ids=current_chunk_ids,
-            start_idx=current_chunk_start,
-            end_idx=current_chunk_start + len(current_chunk) - 1,
-            original_tokens=current_original_tokens,
-            folded_tokens=80,
-        )
-        fold_anchors.append(anchor)
-        folded_prefix.append({
+    # Build folded messages: fold summaries + recent messages
+    folded_messages = []
+    for anchor in fold_anchors:
+        folded_messages.append({
             "role": "system",
-            "content": f"[Folded: {anchor.summary}]",
-            "fold_anchor_id": anchor.id,
+            "content": f"[FOLD:{anchor.id}] {anchor.summary}",
+            "meta": {
+                "fold_id": anchor.id,
+                "covered_count": len(anchor.covered_message_ids),
+                "original_tokens": anchor.original_tokens,
+            },
         })
+    folded_messages.extend(recent)
 
-    # Combine folded prefix with preserved messages
-    folded_messages = folded_prefix + preserved
-
-    # Calculate totals
-    original_tokens = sum(count_message_tokens(m) for m in messages)
     folded_tokens = sum(count_message_tokens(m) for m in folded_messages)
-    compression_ratio = folded_tokens / original_tokens if original_tokens > 0 else 0
+    total_original = sum(count_message_tokens(m) for m in messages)
+    ratio = folded_tokens / total_original if total_original > 0 else 1.0
 
-    # Generate fold_id from all anchors
-    fold_id = hashlib.sha256(
-        "".join(a.id for a in fold_anchors).encode()
-    ).hexdigest()[:16]
+    fold_id = fold_anchors[-1].id if fold_anchors else ""
 
     return CompressedConversation(
         folded_messages=folded_messages,
         fold_anchors=fold_anchors,
-        original_tokens=original_tokens,
+        original_tokens=total_original,
         folded_tokens=folded_tokens,
-        compression_ratio=compression_ratio,
-        fold_id=f"fold_{fold_id}",
+        compression_ratio=ratio,
+        fold_id=fold_id,
     )
 
 
@@ -232,51 +192,52 @@ def unfold_conversation(
 ) -> tuple[list[dict[str, Any]], int]:
     """Restore original messages from folded representation.
 
-    Note: Full decompression requires the original messages or a stored ledger.
-    This implementation returns the folded messages with anchors expanded
-    as placeholders when original_messages is not provided.
-
     Args:
-        folded_messages: Messages with fold summary placeholders
-        fold_anchors: Anchor metadata from compression
-        original_messages: Original messages if available (from storage)
+        folded_messages: Messages including fold summaries
+        fold_anchors: Anchor metadata for each fold
+        original_messages: Original messages for full restoration (if available)
 
     Returns:
-        Tuple of (restored_messages, restored_count)
+        Tuple of (restored messages, count of restored from folds)
     """
-    if original_messages is not None:
-        # Full restoration from stored originals
-        return original_messages, len(original_messages)
-
-    # Without originals, we can only expand anchor placeholders
-    # into structured summaries (not full original content)
-    restored: list[dict[str, Any]] = []
+    restored = []
     restored_count = 0
 
-    anchor_map = {a["id"]: a for a in fold_anchors}
+    # Build lookup for fold anchors by fold_id
+    anchor_by_id = {a["fold_id"]: a for a in fold_anchors}
 
     for msg in folded_messages:
-        if msg.get("role") == "system" and "fold_anchor_id" in msg:
-            anchor_id = msg["fold_anchor_id"]
-            anchor = anchor_map.get(anchor_id)
-            if anchor:
-                # Expand to structured representation
+        content = msg.get("content", "")
+        meta = msg.get("meta", {})
+
+        if isinstance(content, str) and content.startswith("[FOLD:") and "fold_id" in meta:
+            fold_id = meta["fold_id"]
+            anchor = anchor_by_id.get(fold_id)
+
+            if anchor and original_messages:
+                # Restore from original messages using covered_ids
+                covered_ids = anchor.get("covered_ids", [])
+                for orig_msg in original_messages:
+                    if message_id(orig_msg) in covered_ids:
+                        restored.append(orig_msg)
+                        restored_count += 1
+            elif anchor:
+                # No original messages available, create placeholder
                 restored.append({
                     "role": "system",
-                    "content": f"[Folded Segment: {anchor.get('summary', 'Unknown')}]",
-                    "fold_anchor": anchor,
-                    "covered_message_ids": anchor.get("covered_message_ids", []),
-                    "original_tokens": anchor.get("original_tokens", 0),
+                    "content": f"[RESTORED FOLD:{fold_id}] {anchor.get('anchor_text', 'Folded content')}",
+                    "meta": {"restored_from_fold": fold_id, "covered_ids": anchor.get("covered_ids", [])},
                 })
-                restored_count += anchor.get("covered_message_count", len(anchor.get("covered_message_ids", [])))
-            else:
-                restored.append(msg)
+                restored_count += len(anchor.get("covered_ids", []))
         else:
             restored.append(msg)
 
+    return restored, restored_count
+
+
 def search_folds(
     query: str,
-    fold_anchors: list[FoldAnchor],
+    fold_anchors: list[dict[str, Any]],
     max_results: int = 10,
     min_score: float = 0.1,
 ) -> list[dict[str, Any]]:
@@ -284,61 +245,43 @@ def search_folds(
 
     Args:
         query: Search query string
-        fold_anchors: List of fold anchors to search
-        max_results: Maximum number of results to return
-        min_score: Minimum relevance score (0-1) to include
+        fold_anchors: List of fold anchor dictionaries
+        max_results: Maximum results to return
+        min_score: Minimum relevance score (0-1)
 
     Returns:
-        List of matching fold summaries with anchor references and scores
+        List of matching fold results with scores
     """
-    if not query.strip() or not fold_anchors:
-        return []
-
     query_lower = query.lower()
     query_terms = set(query_lower.split())
 
-    results: list[dict[str, Any]] = []
+    results = []
 
     for anchor in fold_anchors:
-        # Score based on summary text match
-        summary_lower = anchor.summary.lower()
-        summary_terms = set(summary_lower.split())
+        summary_lower = anchor.get("anchor_text", "").lower()
+        anchor_terms = set(summary_lower.split())
 
-        # Term overlap score (Jaccard similarity)
-        if query_terms and summary_terms:
-            intersection = query_terms & summary_terms
-            union = query_terms | summary_terms
-            term_score = len(intersection) / len(union) if union else 0
-        else:
-            term_score = 0.0
+        # Jaccard similarity
+        intersection = query_terms & anchor_terms
+        union = query_terms | anchor_terms
+        jaccard = len(intersection) / len(union) if union else 0
 
-        # Substring match bonus
-        substring_score = 0.0
-        for term in query_terms:
-            if term in summary_lower:
-                substring_score += 0.3
-        substring_score = min(substring_score, 0.5)
+        # Term frequency score
+        tf_score = sum(summary_lower.count(term) for term in query_terms)
+        tf_normalized = min(tf_score / 10, 1.0)
 
-        # Role relevance bonus
-        role_score = 0.0
-        for term in query_terms:
-            if term in ["user", "assistant", "system", "tool"]:
-                role_terms = set(summary_lower.split())
-                if term in role_terms:
-                    role_score += 0.2
-        role_score = min(role_score, 0.3)
-
-        total_score = term_score + substring_score + role_score
+        # Combined score
+        total_score = 0.7 * jaccard + 0.3 * tf_normalized
 
         if total_score >= min_score:
             results.append({
-                "anchor_id": anchor.id,
-                "summary": anchor.summary,
-                "covered_message_ids": anchor.covered_message_ids,
-                "start_idx": anchor.start_idx,
-                "end_idx": anchor.end_idx,
-                "original_tokens": anchor.original_tokens,
-                "folded_tokens": anchor.folded_tokens,
+                "anchor_id": anchor.get("fold_id", ""),
+                "summary": anchor.get("anchor_text", ""),
+                "covered_message_ids": anchor.get("covered_ids", []),
+                "start_idx": anchor.get("start_idx", 0),
+                "end_idx": anchor.get("end_idx", 0),
+                "original_tokens": anchor.get("original_tokens", 0),
+                "folded_tokens": anchor.get("folded_tokens", 0),
                 "score": round(total_score, 3),
             })
 
@@ -377,33 +320,18 @@ class SearchContextResponse(BaseModel):
 
 
 def search_context(request: SearchContextRequest) -> SearchContextResponse:
-    """Search compressed conversation folds for relevant context.
-
-    Args:
-        request: Search request with query and fold anchors
-
-    Returns:
-        SearchContextResponse with matching folds ranked by relevance
-    """
-    # Convert dict anchors to FoldAnchor objects
-    anchors: list[FoldAnchor] = []
-    for a in request.fold_anchors:
-        anchors.append(FoldAnchor(
-            id=a["id"],
-            summary=a["summary"],
-            covered_message_ids=a["covered_message_ids"],
-            start_idx=a["start_idx"],
-            end_idx=a["end_idx"],
-            original_tokens=a["original_tokens"],
-            folded_tokens=a["folded_tokens"],
-        ))
-
-    results = search_folds(request.query, anchors, request.max_results, request.min_score)
+    """Search compressed conversation folds for relevant context."""
+    results = search_folds(
+        query=request.query,
+        fold_anchors=request.fold_anchors,
+        max_results=request.max_results,
+        min_score=request.min_score,
+    )
 
     return SearchContextResponse(
         query=request.query,
-        results=[SearchContextResult(**r) for r in results],
-        total_anchors_searched=len(anchors),
+        results=results,
+        total_anchors_searched=len(request.fold_anchors),
         results_count=len(results),
     )
 
