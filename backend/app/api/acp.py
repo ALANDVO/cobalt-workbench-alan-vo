@@ -1,11 +1,12 @@
 """ACP (Agent Context Protocol) endpoints."""
 
 from contextlib import asynccontextmanager
-from typing import Optional, AsyncGenerator
+from typing import Optional, AsyncGenerator, Any
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from app.core.config import Settings, get_settings
 from app.core.database import init_db, close_db, get_db
@@ -74,7 +75,6 @@ class ACPStatusResponse(BaseModel):
     sessions: list[SessionSummary] = Field(default_factory=list)
     recent_folds: list[FoldStats] = Field(default_factory=list)
 
-
 @router.get("/status", response_model=ACPStatusResponse, summary="ACP status")
 async def acp_status(
     settings: Settings = Depends(get_settings),
@@ -88,8 +88,8 @@ async def acp_status(
         raise HTTPException(status_code=503, detail="ACP is disabled")
 
     # Get all sessions from database
-    result = await storage.get_db().execute(
-        "SELECT * FROM sessions ORDER BY updated_at DESC"
+    result = await storage.db_session().execute(
+        text("SELECT * FROM sessions ORDER BY updated_at DESC")
     )
     sessions_data = result.fetchall()
 
@@ -180,7 +180,7 @@ class CompressResponse(BaseModel):
     session_id: str
 
 
-@router.post("/compress", response_model=CompressResponse, summary="Compress history")
+@router.post("/compress", summary="Compress history")
 async def compress_history(
     request: CompressRequest,
     settings: Settings = Depends(get_settings),
@@ -208,7 +208,9 @@ async def compress_history(
     if result.fold_anchors:
         # Get messages covered by the fold (all but recent)
         covered_messages = request.messages[:-request.preserve_recent] if request.preserve_recent < len(request.messages) else []
-        await storage.save_fold(session, result.fold_anchors[0], covered_messages)
+        # Convert FoldAnchor to dict format expected by storage
+        fold_dict = result.fold_anchors[0].to_dict()
+        await storage.save_fold(session, fold_dict, covered_messages)
 
     # Save recent messages
     recent_messages = request.messages[-request.preserve_recent:] if request.preserve_recent > 0 else []
@@ -237,7 +239,7 @@ class DecompressResponse(BaseModel):
     session_id: str
 
 
-@router.post("/decompress", response_model=DecompressResponse, summary="Decompress history")
+@router.post("/decompress", response_model=None, summary="Decompress history")
 async def decompress_history(
     request: DecompressRequest,
     storage: SessionStorage = Depends(get_session_storage),
@@ -288,8 +290,9 @@ async def decompress_history(
 class SearchContextRequest(BaseModel):
     """Request to search compressed conversation context."""
     query: str = Field(..., description="Search query")
-    agent_namespace: str = Field(..., description="Agent namespace")
-    conversation_id: str = Field(..., description="Conversation identifier")
+    agent_namespace: Optional[str] = Field(None, description="Agent namespace (required if not providing fold_anchors)")
+    conversation_id: Optional[str] = Field(None, description="Conversation identifier (required if not providing fold_anchors)")
+    fold_anchors: Optional[list[dict[str, Any]]] = Field(None, description="Fold anchors from compressed history (alternative to session lookup)")
     max_results: int = Field(10, description="Maximum results to return")
     min_score: float = Field(0.1, description="Minimum relevance score (0-1)")
 
@@ -312,27 +315,44 @@ async def search_context_endpoint(
     Search compressed conversation folds for relevant context.
 
     Returns matching fold summaries with anchor references ranked by relevance.
+    Supports two modes:
+    1. Session lookup: provide agent_namespace and conversation_id
+    2. Direct anchors: provide fold_anchors directly
     """
-    session = await storage.get_session(request.agent_namespace, request.conversation_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    if request.fold_anchors is not None:
+        # Direct anchors mode
+        fold_anchors = request.fold_anchors
+        session_id = "direct"
+    else:
+        # Session lookup mode
+        if not request.agent_namespace or not request.conversation_id:
+            raise HTTPException(
+                status_code=422,
+                detail="Either fold_anchors or both agent_namespace and conversation_id are required"
+            )
+        session = await storage.get_session(request.agent_namespace, request.conversation_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
 
-    folds = await storage.get_folds(session)
+        folds = await storage.get_folds(session)
 
-    # Convert to service format
-    fold_anchors = [
-        {
-            "fold_id": f.fold_id,
-            "anchor_text": f.anchor_text,
-            "covered_ids": json.loads(f.covered_ids),
-            "token_count": f.token_count,
-            "created_at": f.created_at.isoformat() + "Z",
-            "message_count": len(await storage.get_messages_for_fold(session, f.fold_id)),
-        }
-        for f in folds
-    ]
+        # Convert to service format
+        fold_anchors = [
+            {
+                "fold_id": f.fold_id,
+                "anchor_text": f.anchor_text,
+                "covered_ids": json.loads(f.covered_ids),
+                "token_count": f.token_count,
+                "created_at": f.created_at.isoformat() + "Z",
+                "message_count": len(await storage.get_messages_for_fold(session, f.fold_id)),
+            }
+            for f in folds
+        ]
+        session_id = f"sess_{session.id:03d}"
 
-    service_request = SearchContextRequest(
+    # Use service function (imported as search_context from acp_compress)
+    from app.services.acp_compress import SearchContextRequest as ServiceSearchContextRequest
+    service_request = ServiceSearchContextRequest(
         query=request.query,
         fold_anchors=fold_anchors,
         max_results=request.max_results,
@@ -346,7 +366,7 @@ async def search_context_endpoint(
         results=response.results,
         total_anchors_searched=response.total_anchors_searched,
         results_count=response.results_count,
-        session_id=f"sess_{session.id:03d}",
+        session_id=session_id,
     )
 
 

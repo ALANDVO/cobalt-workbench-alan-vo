@@ -4,12 +4,13 @@ import json
 from datetime import datetime
 from typing import Optional
 
+from fastapi import Depends
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import get_db
 from app.models import Session, FoldAnchor, Message
 from app.services.acp_compress import FoldAnchor as CompressFoldAnchor, CompressedConversation
-
 
 class SessionStorage:
     """Handles persistence of sessions, folds, and messages."""
@@ -17,7 +18,7 @@ class SessionStorage:
     def __init__(self, db):
         self._db = db
 
-    def get_db(self):
+    def db_session(self):
         return self._db
 
     async def get_or_create_session(
@@ -55,18 +56,32 @@ class SessionStorage:
     async def save_fold(
         self,
         session: Session,
-        fold: CompressFoldAnchor,
+        fold: CompressFoldAnchor | dict,
         messages: list[dict],
     ) -> FoldAnchor:
         """Save a fold anchor and its covered messages."""
+        # Support both object with attributes and dict
+        def get_attr(obj, key):
+            if isinstance(obj, dict):
+                return obj.get(key)
+            return getattr(obj, key, None)
+
         # Create fold anchor
+        created_at_val = get_attr(fold, "created_at")
+        if isinstance(created_at_val, (int, float)):
+            created_at = datetime.fromtimestamp(created_at_val)
+        elif isinstance(created_at_val, str):
+            created_at = datetime.fromisoformat(created_at_val.replace("Z", "+00:00"))
+        else:
+            created_at = datetime.utcnow()
+
         fold_anchor = FoldAnchor(
             session_id=session.id,
-            fold_id=fold.fold_id,
-            anchor_text=fold.anchor_text,
-            covered_ids=json.dumps(fold.covered_ids),
-            token_count=fold.token_count,
-            created_at=datetime.fromisoformat(fold.created_at.replace("Z", "+00:00")) if fold.created_at else datetime.utcnow(),
+            fold_id=get_attr(fold, "fold_id"),
+            anchor_text=get_attr(fold, "anchor_text"),
+            covered_ids=json.dumps(get_attr(fold, "covered_ids")),
+            token_count=get_attr(fold, "token_count"),
+            created_at=created_at,
         )
         self._db.add(fold_anchor)
         await self._db.flush()
@@ -76,7 +91,7 @@ class SessionStorage:
             message_id = msg.get("id") or self._message_id(msg)
             message = Message(
                 session_id=session.id,
-                fold_id=fold.fold_id,
+                fold_id=get_attr(fold, "fold_id"),
                 message_id=message_id,
                 role=msg.get("role", "unknown"),
                 content=msg.get("content", ""),
@@ -211,8 +226,8 @@ class SessionStorage:
             "token_count": message.token_count,
         }
 
-
-async def get_session_storage(db: AsyncSession):
+async def get_session_storage():
     """Dependency injection for SessionStorage."""
-    return SessionStorage(db)
-
+    from app.core.database import async_session_maker
+    async with async_session_maker() as session:
+        yield SessionStorage(session)
