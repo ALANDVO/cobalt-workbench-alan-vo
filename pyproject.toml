@@ -1,6 +1,6 @@
 [project]
 name = "cobalt-workbench"
-version = "1.0.0"
+version = "1.5.0"
 description = "Context-compression plugin for small context windows, 5x token savings, month-long sessions"
 readme = "README.md"
 license = {text = "MIT"}

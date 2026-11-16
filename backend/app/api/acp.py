@@ -386,7 +386,7 @@ async def list_sessions(
     storage: SessionStorage = Depends(get_session_storage),
 ) -> list[SessionResponse]:
     """List all persisted sessions."""
-    result = await storage.get_db().execute(
+    result = await storage.db_session().execute(
         "SELECT * FROM sessions ORDER BY updated_at DESC"
     )
     sessions_data = result.fetchall()
