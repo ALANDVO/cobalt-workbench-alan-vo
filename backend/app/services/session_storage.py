@@ -197,12 +197,14 @@ class SessionStorage:
             messages = await self.get_messages_for_fold(session, f.fold_id)
             fold_anchors.append(
                 CompressFoldAnchor(
-                    fold_id=f.fold_id,
-                    anchor_text=f.anchor_text,
-                    covered_ids=json.loads(f.covered_ids),
-                    token_count=f.token_count,
+                    id=f.fold_id,
+                    summary=f.anchor_text,
+                    covered_message_ids=json.loads(f.covered_ids),
+                    start_idx=0,
+                    end_idx=0,
+                    original_tokens=0,
+                    folded_tokens=f.token_count,
                     created_at=f.created_at.isoformat() + "Z",
-                    message_count=len(messages),
                 )
             )
 
@@ -230,4 +232,9 @@ async def get_session_storage():
     """Dependency injection for SessionStorage."""
     from app.core.database import async_session_maker
     async with async_session_maker() as session:
-        yield SessionStorage(session)
+        try:
+            yield SessionStorage(session)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
