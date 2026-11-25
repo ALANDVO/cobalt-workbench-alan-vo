@@ -5,8 +5,8 @@ from app.main import create_app
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncClient:
-    """Create test client."""
+async def client(_init_test_db) -> AsyncClient:
+    """Create test client with an initialized, isolated database."""
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
