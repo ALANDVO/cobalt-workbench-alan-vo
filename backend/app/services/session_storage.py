@@ -1,6 +1,7 @@
 """Session storage service for persisting conversations and folds."""
 
 import json
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -188,34 +189,57 @@ class SessionStorage:
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
     async def to_compressed_conversation(self, session: Session, preserve_recent: int = 10) -> CompressedConversation:
-        """Reconstruct CompressedConversation from stored session."""
+        """Reconstruct a CompressedConversation from the stored session.
+
+        Rebuilds the fold anchors and folded-message view (fold summaries plus
+        recent uncompressed messages) so the session can be decompressed or
+        re-searched after a restart. Token counts are recomputed from the
+        persisted rows because original per-fold token counts are not stored.
+        """
         folds = await self.get_folds(session)
         recent_messages = await self.get_recent_messages(session, preserve_recent)
 
-        fold_anchors = []
+        fold_anchors: list[CompressFoldAnchor] = []
+        folded_messages: list[dict] = []
         for f in folds:
-            messages = await self.get_messages_for_fold(session, f.fold_id)
+            covered_ids = json.loads(f.covered_ids)
             fold_anchors.append(
                 CompressFoldAnchor(
                     id=f.fold_id,
                     summary=f.anchor_text,
-                    covered_message_ids=json.loads(f.covered_ids),
+                    covered_message_ids=covered_ids,
                     start_idx=0,
                     end_idx=0,
                     original_tokens=0,
                     folded_tokens=f.token_count,
-                    created_at=f.created_at.isoformat() + "Z",
+                    created_at=f.created_at.timestamp() if f.created_at else time.time(),
                 )
             )
+            folded_messages.append(
+                {
+                    "role": "system",
+                    "content": f"[FOLD:{f.fold_id}] {f.anchor_text}",
+                    "meta": {"fold_id": f.fold_id, "covered_count": len(covered_ids)},
+                }
+            )
+
+        recent_dicts = [self._message_to_dict(m) for m in recent_messages]
+        folded_messages.extend(recent_dicts)
+
+        all_messages = await self.get_all_messages(session)
+        original_tokens = sum(m.token_count for m in all_messages)
+        folded_tokens = sum(f.token_count for f in folds) + sum(
+            m.token_count for m in recent_messages
+        )
+        ratio = folded_tokens / original_tokens if original_tokens > 0 else 1.0
 
         return CompressedConversation(
-            folds=fold_anchors,
-            recent_messages=[self._message_to_dict(m) for m in recent_messages],
-            original_token_count=sum(f.token_count for f in fold_anchors)
-            + sum(m.token_count for m in recent_messages),
-            compressed_token_count=sum(f.token_count for f in fold_anchors)
-            + sum(m.token_count for m in recent_messages),
-            fold_id=fold_anchors[-1].fold_id if fold_anchors else "",
+            folded_messages=folded_messages,
+            fold_anchors=fold_anchors,
+            original_tokens=original_tokens,
+            folded_tokens=folded_tokens,
+            compression_ratio=ratio,
+            fold_id=folds[-1].fold_id if folds else "",
         )
 
     def _message_to_dict(self, message: Message) -> dict:

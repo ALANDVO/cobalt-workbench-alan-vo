@@ -257,28 +257,23 @@ async def decompress_history(
 
     # If specific fold requested, filter to that fold
     if request.fold_id:
-        fold = next((f for f in compressed.folds if f.fold_id == request.fold_id), None)
-        if not fold:
+        anchor = next((f for f in compressed.fold_anchors if f.id == request.fold_id), None)
+        if not anchor:
             raise HTTPException(status_code=404, detail="Fold not found")
-        folds = [fold]
+        selected = [anchor]
     else:
-        folds = compressed.folds
+        selected = compressed.fold_anchors
 
-    messages, restored_count = unfold_conversation(
-        folded_messages=compressed.recent_messages,
-        fold_anchors=[{"fold_id": f.fold_id, "anchor_text": f.anchor_text, "covered_ids": f.covered_ids} for f in folds],
-        original_messages=None,  # We'll get them from storage
-    )
-
-    # Also retrieve original messages for each fold
+    # Retrieve original messages for each selected fold from storage
     all_restored = []
-    for f in folds:
-        fold_messages = await storage.get_messages_for_fold(session, f.fold_id)
+    for f in selected:
+        fold_messages = await storage.get_messages_for_fold(session, f.id)
         for m in fold_messages:
             all_restored.append(storage._message_to_dict(m))
 
-    # Add recent messages
-    all_restored.extend(storage._message_to_dict(m) for m in compressed.recent_messages)
+    # Add recent (unfolded) messages directly from storage
+    recent = await storage.get_recent_messages(session, 1_000_000)
+    all_restored.extend(storage._message_to_dict(m) for m in recent)
 
     return DecompressResponse(
         messages=all_restored,
@@ -387,7 +382,7 @@ async def list_sessions(
 ) -> list[SessionResponse]:
     """List all persisted sessions."""
     result = await storage.db_session().execute(
-        "SELECT * FROM sessions ORDER BY updated_at DESC"
+        text("SELECT * FROM sessions ORDER BY updated_at DESC")
     )
     sessions_data = result.fetchall()
 
